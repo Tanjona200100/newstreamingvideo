@@ -2,14 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from "react-router-dom";
 import { User, Lock } from 'lucide-react';
 import "./login.css";
+import { useAuth } from '../hooks/useAuth'; // Import du hook
 
 export default function VRLiveLogin() {
   const navigate = useNavigate();
+  const { login, isAuthenticated } = useAuth(); // Utilisation du hook
 
   const MAX_ATTEMPTS = 5;
   const BLOCK_TIME = 15 * 60 * 1000;
 
-  const [email, setEmail] = useState('votreemail@mail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -22,6 +24,14 @@ export default function VRLiveLogin() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [timer, setTimer] = useState(0);
 
+  // Redirection si déjà authentifié
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log("Déjà authentifié, redirection...");
+      navigate("/home", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
   // Vérifier et restaurer l'état de blocage
   useEffect(() => {
     const checkBlockStatus = () => {
@@ -31,10 +41,6 @@ export default function VRLiveLogin() {
         if (remaining > 0) {
           setIsBlocked(true);
           setTimer(Math.floor(remaining / 1000));
-          showPopupMessage(
-            "Compte bloqué",
-            `Trop de tentatives échouées. Veuillez patienter ${formatTime(Math.floor(remaining / 1000))} avant de réessayer.`
-          );
         } else {
           localStorage.removeItem("blockedUntil");
           localStorage.removeItem("loginAttempts");
@@ -118,11 +124,16 @@ export default function VRLiveLogin() {
     return true;
   };
 
-  // Fonction de redirection
-  const redirectToHome = useCallback(() => {
-    console.log("Redirection vers /home...");
-    navigate("/home", { replace: true });
-  }, [navigate]);
+  // Charger l'email sauvegardé si "Se souvenir de moi" était coché
+  useEffect(() => {
+    const savedRememberMe = localStorage.getItem("rememberMe");
+    const savedEmail = localStorage.getItem("savedEmail");
+    
+    if (savedRememberMe === "true" && savedEmail) {
+      setRememberMe(true);
+      setEmail(savedEmail);
+    }
+  }, []);
 
   // Gestion de la connexion
   const handleSubmit = async (e) => {
@@ -147,9 +158,8 @@ export default function VRLiveLogin() {
     let attempts = parseInt(localStorage.getItem("loginAttempts") || "0");
     
     try {
-      const apiUrl = process.env.REACT_APP_API_URL;
-      const response = await fetch(`http://192.168.2.161:5000/api/auth/login`, {
-        method: "POST",
+      const response = await fetch('http://192.168.2.161:5000/api/auth/login', {
+        method: 'POST',
         headers: { 
           "Content-Type": "application/json",
           "Accept": "application/json"
@@ -162,10 +172,8 @@ export default function VRLiveLogin() {
       });
 
       const responseText = await response.text();
-      console.log("Réponse serveur:", responseText);
-      console.log("Statut HTTP:", response.status);
-
       let data;
+      
       try {
         data = responseText ? JSON.parse(responseText) : {};
       } catch (parseError) {
@@ -195,14 +203,6 @@ export default function VRLiveLogin() {
           } else {
             showPopupMessage("Erreur de connexion", data.message || "Identifiants incorrects");
           }
-        } else if (response.status === 404) {
-          showPopupMessage("Service indisponible", "Service temporairement indisponible");
-        } else if (response.status === 403) {
-          // Erreur spécifique pour la limite de live VR
-          showPopupMessage(
-            "Limite atteinte",
-            data.message || "Vous ne pouvez pas visionner plus de 4 live VR en simultané"
-          );
         } else {
           showPopupMessage(
             `Erreur ${response.status}`,
@@ -215,15 +215,13 @@ export default function VRLiveLogin() {
       }
 
       // SUCCÈS
-      console.log("Connexion réussie! Données reçues:", data);
-      
-      if (data.message && data.message.includes("Connexion réussie")) {
-        if (data.token) {
-          localStorage.setItem("authToken", data.token);
-        } else {
-          const mockToken = `dev-token-${Date.now()}`;
-          localStorage.setItem("authToken", mockToken);
-          localStorage.setItem("isDevMode", "true");
+      if (data.token) {
+        // Stocker le token
+        localStorage.setItem("authToken", data.token);
+        localStorage.setItem("isLoggedIn", "true");
+        
+        if (data.user) {
+          localStorage.setItem("user", JSON.stringify(data.user));
         }
         
         if (rememberMe) {
@@ -234,28 +232,20 @@ export default function VRLiveLogin() {
           localStorage.removeItem("savedEmail");
         }
         
-        if (data.user) {
-          localStorage.setItem("user", JSON.stringify(data.user));
-        } else {
-          localStorage.setItem("user", JSON.stringify({
-            email: email,
-            name: email.split('@')[0],
-            isAuthenticated: true
-          }));
-        }
-        
-        localStorage.setItem("isLoggedIn", "true");
         localStorage.removeItem("loginAttempts");
         localStorage.removeItem("blockedUntil");
+        
+        // Utiliser le hook login pour mettre à jour l'état global
+        // Vous devrez peut-être adapter cette partie selon votre implémentation
         
         // Afficher la popup de succès
         showPopupMessage("Connexion réussie", "Vous êtes maintenant connecté. Redirection en cours...");
         
-        // Rediriger après 2 secondes pour laisser voir la popup
+        // Rediriger après 2 secondes
         setTimeout(() => {
           setIsLoading(false);
           closePopup();
-          redirectToHome();
+          navigate("/home", { replace: true });
         }, 2000);
         
       } else {
@@ -275,30 +265,6 @@ export default function VRLiveLogin() {
       setIsLoading(false);
     }
   };
-
-  // Charger l'email sauvegardé si "Se souvenir de moi" était coché
-  useEffect(() => {
-    const savedRememberMe = localStorage.getItem("rememberMe");
-    const savedEmail = localStorage.getItem("savedEmail");
-    
-    if (savedRememberMe === "true" && savedEmail) {
-      setRememberMe(true);
-      setEmail(savedEmail);
-    }
-  }, []);
-
-  // Vérifier si déjà connecté
-  useEffect(() => {
-    const isLoggedIn = localStorage.getItem("isLoggedIn");
-    const authToken = localStorage.getItem("authToken");
-    
-    if (isLoggedIn === "true" && authToken) {
-      console.log("Déjà connecté, redirection vers /home");
-      setTimeout(() => {
-        redirectToHome();
-      }, 100);
-    }
-  }, [redirectToHome]);
 
   // Gestion de la touche Entrée
   const handleKeyPress = (e) => {
@@ -325,6 +291,11 @@ export default function VRLiveLogin() {
     );
   };
 
+  // Empêcher la redirection multiple
+  if (isAuthenticated) {
+    return null; // Ou un loader pendant la redirection
+  }
+
   return (
     <>
       <div className="login-container" onKeyPress={handleKeyPress}>
@@ -342,9 +313,7 @@ export default function VRLiveLogin() {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                }}
+                onChange={(e) => setEmail(e.target.value)}
                 className="form-input"
                 placeholder="votreemail@mail.com"
                 disabled={isLoading || isBlocked}
@@ -362,9 +331,7 @@ export default function VRLiveLogin() {
               <input
                 type="password"
                 value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                }}
+                onChange={(e) => setPassword(e.target.value)}
                 className="form-input"
                 placeholder="••••••••••••••••"
                 disabled={isLoading || isBlocked}

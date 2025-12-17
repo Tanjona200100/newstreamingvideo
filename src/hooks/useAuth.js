@@ -1,53 +1,84 @@
-// src/hooks/useAuth.js
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext, createContext } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-export const useAuth = () => {
-  const [authState, setAuthState] = useState({
-    isAuthenticated: false,
-    isLoading: true,
-    user: null,
-  });
+const AuthContext = createContext({});
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem("authToken");
-    const userData = localStorage.getItem("userData");
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('http://192.168.2.161:5000/api/auth/me', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+          setIsAuthenticated(true);
+        } else {
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        setIsAuthenticated(false);
+        setUser(null);
+      }
+    };
 
-    if (token) {
-      setAuthState({
-        isAuthenticated: true,
-        isLoading: false,
-        user: userData ? JSON.parse(userData) : null,
-      });
-    } else {
-      setAuthState({
-        isAuthenticated: false,
-        isLoading: false,
-        user: null,
-      });
-    }
+    checkAuth();
   }, []);
 
-  const login = (token, userData) => {
-    localStorage.setItem("authToken", token);
-    if (userData) {
-      localStorage.setItem("userData", JSON.stringify(userData));
+  const login = async (email, password) => {
+    try {
+      const response = await fetch('http://192.168.2.161:5000/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
+        setIsAuthenticated(true);
+        return { success: true };
+      } else {
+        return { success: false, error: 'Identifiants incorrects' };
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      return { success: false, error: 'Erreur réseau' };
     }
-    setAuthState({
-      isAuthenticated: true,
-      isLoading: false,
-      user: userData,
-    });
   };
 
-  const logout = () => {
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("userData");
-    setAuthState({
-      isAuthenticated: false,
-      isLoading: false,
-      user: null,
-    });
+  const logout = async () => {
+    try {
+      await fetch('http://192.168.2.161:5000/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      
+      setUser(null);
+      setIsAuthenticated(false);
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
-  return { ...authState, login, logout };
+  return (
+    <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
+
+export const useAuth = () => useContext(AuthContext);
